@@ -1,0 +1,331 @@
+//Package smtpproxy is based heavily on https://github.com/emersion/go-smtp, with increased transparency of response codes and no sasl dependency.
+package smtpproxy
+
+import (
+	"crypto/tls"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"net"
+	"net/textproto"
+	"runtime/debug"
+	"strings"
+	"sync"
+	"time"
+)
+
+// ConnectionState gives useful info about the incoming connection, including the TLS status
+type ConnectionState struct {
+	Hostname   string
+	LocalAddr  net.Addr
+	RemoteAddr net.Addr
+	TLS        tls.ConnectionState
+}
+
+// Conn is the incoming connection
+type Conn struct {
+	conn      net.Conn
+	text      *textproto.Conn
+	server    *Server
+	helo      string
+	nbrErrors int
+	session   Session
+	locker    sync.Mutex
+
+	fromReceived bool
+}
+
+func newConn(c net.Conn, s *Server) *Conn {
+	sc := &Conn{
+		server: s,
+		conn:   c,
+	}
+
+	sc.init()
+	return sc
+}
+
+func (c *Conn) init() {
+	var rwc io.ReadWriteCloser = c.conn
+	if c.server.Debug != nil {
+		rwc = struct {
+			io.Reader
+			io.Writer
+			io.Closer
+		}{
+			io.TeeReader(c.conn, c.server.Debug),
+			io.MultiWriter(c.conn, c.server.Debug),
+			c.conn,
+		}
+	}
+	c.text = textproto.NewConn(rwc)
+}
+
+func (c *Conn) unrecognizedCommand(cmd string) {
+	c.WriteResponse(500, EnhancedCode{5, 5, 2}, fmt.Sprintf("Syntax error, %v command unrecognized", cmd))
+
+	c.nbrErrors++
+	if c.nbrErrors > 3 {
+		c.WriteResponse(500, EnhancedCode{5, 5, 2}, "Too many unrecognized commands")
+		c.Close()
+	}
+}
+
+// Commands are dispatched to the appropriate handler functions.
+func (c *Conn) handle(cmd string, arg string) {
+	// If panic happens during command handling - send 421 response
+	// and close connection.
+	defer func() {
+		if err := recover(); err != nil {
+			c.WriteResponse(421, EnhancedCode{4, 0, 0}, "Internal server error")
+			c.Close()
+
+			stack := debug.Stack()
+			c.server.ErrorLog.Printf("panic serving %v: %v\n%s", c.State().RemoteAddr, err, stack)
+		}
+	}()
+
+	if cmd == "" {
+		c.WriteResponse(500, EnhancedCode{5, 5, 2}, "Speak up")
+		return
+	}
+
+	cmd = strings.ToUpper(cmd)
+	switch cmd {
+	case "HELO", "EHLO":
+		c.handleGreet(cmd, arg)
+	case "STARTTLS":
+		c.handleStartTLS()
+	case "AUTH", "MAIL", "RCPT":
+		c.handlePassthru(cmd, arg)
+	case "RSET": // Reset session
+		c.reset()
+		c.WriteResponse(250, EnhancedCode{2, 0, 0}, "Session reset")
+	case "DATA":
+		c.handleData(arg)
+	case "QUIT":
+		c.handlePassthru(cmd, arg)
+		c.Close()
+	default:
+		c.handlePassthru(cmd, arg)
+	}
+}
+
+// Server name of this connection
+func (c *Conn) Server() *Server {
+	return c.server
+}
+
+// Session associated with this connection
+func (c *Conn) Session() Session {
+	c.locker.Lock()
+	defer c.locker.Unlock()
+	return c.session
+}
+
+// SetSession - setting the user resets any message being generated
+func (c *Conn) SetSession(session Session) {
+	c.locker.Lock()
+	defer c.locker.Unlock()
+	c.session = session
+}
+
+// Close this connection
+func (c *Conn) Close() error {
+	return c.conn.Close()
+}
+
+// TLSConnectionState returns the connection's TLS connection state.
+// Zero values are returned if the connection doesn't use TLS.
+func (c *Conn) TLSConnectionState() (state tls.ConnectionState, ok bool) {
+	tc, ok := c.conn.(*tls.Conn)
+	if !ok {
+		return
+	}
+	return tc.ConnectionState(), true
+}
+
+// State of this connection
+func (c *Conn) State() ConnectionState {
+	state := ConnectionState{}
+	tlsState, ok := c.TLSConnectionState()
+	if ok {
+		state.TLS = tlsState
+	}
+
+	state.Hostname = c.helo
+	state.LocalAddr = c.conn.LocalAddr()
+	state.RemoteAddr = c.conn.RemoteAddr()
+
+	return state
+}
+
+// GREET state -> waiting for HELO
+func (c *Conn) handleGreet(cmd, arg string) {
+	domain, err := parseHelloArgument(arg)
+	if err != nil {
+		c.WriteResponse(501, EnhancedCode{5, 5, 2}, "Domain/address argument required")
+		return
+	}
+	c.helo = domain
+
+	// If no existing session, establish one
+	if c.session == (interface{})(nil) {
+		s, err := c.server.Backend.Init()
+		if err != nil {
+			c.WriteResponse(421, EnhancedCode{4, 0, 0}, "Internal server error")
+			return
+		}
+		c.session = s
+	}
+	// Pass greeting to the backend, updating our server capabilities to mirror them
+	upstreamCaps, err := c.Session().Greet(cmd)
+	if err != nil {
+		c.WriteResponse(421, EnhancedCode{4, 0, 0}, err.Error())
+		return
+	}
+	if len(upstreamCaps) > 0 {
+		c.server.caps = []string{}
+		for _, i := range upstreamCaps {
+			if i != "STARTTLS" {
+				c.server.caps = append(c.server.caps, i)
+			}
+		}
+		// determine separately our downstream STARTTLS capabilities to the client
+		if _, isTLS := c.TLSConnectionState(); c.server.TLSConfig != nil && !isTLS {
+			c.server.caps = append(c.server.caps, "STARTTLS")
+		}
+	}
+	if cmd == "HELO" {
+		c.WriteResponse(250, EnhancedCode{2, 0, 0}, fmt.Sprintf("Hello %s", domain))
+	}
+	args := []string{"Hello " + domain}
+	args = append(args, c.server.caps...)
+	c.WriteResponse(250, NoEnhancedCode, args...)
+}
+
+func code2xxSuccess(code int) bool {
+	return (code >= 200) && (code <= 299)
+}
+
+func code5xxPermFail(code int) bool {
+	return (code >= 500) && (code <= 559)
+}
+
+// Handle a command in passthrough mode, until success or permanent failure
+func (c *Conn) handlePassthru(cmd, arg string) {
+	code, msg, err := c.Session().Passthru(0, cmd, arg)
+	c.WriteResponse(code, NoEnhancedCode, msg)
+	if err != nil {
+		return
+	}
+	for {
+		encoded, err := c.ReadLine()
+		if err != nil {
+			return
+		}
+		code, msg, err := c.Session().Passthru(0, encoded, "")
+		c.WriteResponse(code, NoEnhancedCode, msg)
+		if code2xxSuccess(code) || code5xxPermFail(code) {
+			break
+		}
+	}
+}
+
+// Upgrade the downstream connnection
+// Upgrade the upstream connection, if supported.
+func (c *Conn) handleStartTLS() {
+	if _, isTLS := c.TLSConnectionState(); isTLS {
+		c.WriteResponse(502, EnhancedCode{5, 5, 1}, "Already running in TLS")
+		return
+	}
+	if c.server.TLSConfig == nil {
+		c.WriteResponse(502, EnhancedCode{5, 5, 1}, "TLS not supported")
+		return
+	}
+	c.WriteResponse(220, EnhancedCode{2, 0, 0}, "Ready to start TLS")
+	// Upgrade to TLS
+	var tlsConn *tls.Conn
+	tlsConn = tls.Server(c.conn, c.server.TLSConfig)
+	if err := tlsConn.Handshake(); err != nil {
+		c.WriteResponse(550, EnhancedCode{5, 0, 0}, "Handshake error")
+	}
+	c.conn = tlsConn
+	c.init()
+	// Reset envelope as a new EHLO/HELO is required after STARTTLS
+	c.reset()
+
+	// Upgrade the upstream connection, if supported
+	if err := c.Session().StartTLS(); err != nil {
+		c.WriteResponse(502, EnhancedCode{5, 5, 1}, "TLS not supported by the upstream host")
+	}
+}
+
+//-----------------------------------------------------------------------------
+
+// DATA transparent handler. Note we don't need to check err responses as code, msg carries it
+func (c *Conn) handleData(arg string) {
+	w, code, msg, _ := c.Session().DataCommand()
+	// Enhanced code is at the beginning of msg, no need to add anything
+	c.WriteResponse(code, NoEnhancedCode, msg)
+
+	r := newDataReader(c)
+	code, msg, _ = c.Session().Data(r, w)
+	io.Copy(ioutil.Discard, r) // Make sure all the incoming data has been consumed
+	c.WriteResponse(code, NoEnhancedCode, msg)
+	c.reset()
+}
+
+func (c *Conn) greet() {
+	c.WriteResponse(220, NoEnhancedCode, fmt.Sprintf("%v ESMTP Service Ready", c.server.Domain))
+}
+
+// WriteResponse back to the incoming connection.
+// If you do not want an enhanced code added, pass in value NoEnhancedCode.
+func (c *Conn) WriteResponse(code int, enhCode EnhancedCode, text ...string) {
+	// TODO: error handling
+	if c.server.WriteTimeout != 0 {
+		c.conn.SetWriteDeadline(time.Now().Add(c.server.WriteTimeout))
+	}
+
+	// All responses must include an enhanced code, if it is missing - use
+	// a generic code X.0.0.
+	if enhCode == EnhancedCodeNotSet {
+		cat := code / 100
+		switch cat {
+		case 2, 4, 5:
+			enhCode = EnhancedCode{cat, 0, 0}
+		default:
+			enhCode = NoEnhancedCode
+		}
+	}
+
+	for i := 0; i < len(text)-1; i++ {
+		c.text.PrintfLine("%v-%v", code, text[i])
+	}
+	if enhCode == NoEnhancedCode {
+		c.text.PrintfLine("%v %v", code, text[len(text)-1])
+	} else {
+		c.text.PrintfLine("%v %v.%v.%v %v", code, enhCode[0], enhCode[1], enhCode[2], text[len(text)-1])
+	}
+}
+
+// ReadLine reads a line of input from the incoming connection
+func (c *Conn) ReadLine() (string, error) {
+	if c.server.ReadTimeout != 0 {
+		if err := c.conn.SetReadDeadline(time.Now().Add(c.server.ReadTimeout)); err != nil {
+			return "", err
+		}
+	}
+	return c.text.ReadLine()
+}
+
+func (c *Conn) reset() {
+	c.locker.Lock()
+	defer c.locker.Unlock()
+
+	if c.session != nil {
+		c.session.Reset()
+	}
+	c.fromReceived = false
+}
