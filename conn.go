@@ -93,21 +93,25 @@ func (c *Conn) handle(cmd string, arg string) {
 	cmd = strings.ToUpper(cmd)
 	switch cmd {
 	case "HELO", "EHLO":
-		c.handleGreet(cmd, arg)
-	case "STARTTLS":
-		c.handleStartTLS()
-	case "AUTH", "MAIL", "RCPT":
-		c.handlePassthru(cmd, arg)
+		c.handleHelo(cmd, arg) // Pass in cmd as could be either
+	case "AUTH":
+		c.handleAuth(arg)
+	case "MAIL":
+		c.handleMail(arg)
+	case "RCPT":
+		c.handleRcpt(arg)
 	case "RSET": // Reset session
 		c.reset()
-		c.WriteResponse(250, EnhancedCode{2, 0, 0}, "Session reset")
+		c.handleReset(arg)
 	case "DATA":
 		c.handleData(arg)
+	case "STARTTLS":
+		c.handleStartTLS()
 	case "QUIT":
-		c.handlePassthru(cmd, arg)
+		c.handleQuit(arg)
 		c.Close()
 	default:
-		c.handlePassthru(cmd, arg)
+		c.handlePassthru(cmd, arg) // Rather than rejecting this here, use the upstream server's responses
 	}
 }
 
@@ -160,50 +164,6 @@ func (c *Conn) State() ConnectionState {
 	return state
 }
 
-// GREET state -> waiting for HELO
-func (c *Conn) handleGreet(cmd, arg string) {
-	domain, err := parseHelloArgument(arg)
-	if err != nil {
-		c.WriteResponse(501, EnhancedCode{5, 5, 2}, "Domain/address argument required")
-		return
-	}
-	c.helo = domain
-
-	// If no existing session, establish one
-	if c.session == (interface{})(nil) {
-		s, err := c.server.Backend.Init()
-		if err != nil {
-			c.WriteResponse(421, EnhancedCode{4, 0, 0}, "Internal server error")
-			return
-		}
-		c.session = s
-	}
-	// Pass greeting to the backend, updating our server capabilities to mirror them
-	upstreamCaps, err := c.Session().Greet(cmd)
-	if err != nil {
-		c.WriteResponse(421, EnhancedCode{4, 0, 0}, err.Error())
-		return
-	}
-	if len(upstreamCaps) > 0 {
-		c.server.caps = []string{}
-		for _, i := range upstreamCaps {
-			if i != "STARTTLS" {
-				c.server.caps = append(c.server.caps, i)
-			}
-		}
-		// determine separately our downstream STARTTLS capabilities to the client
-		if _, isTLS := c.TLSConnectionState(); c.server.TLSConfig != nil && !isTLS {
-			c.server.caps = append(c.server.caps, "STARTTLS")
-		}
-	}
-	if cmd == "HELO" {
-		c.WriteResponse(250, EnhancedCode{2, 0, 0}, fmt.Sprintf("Hello %s", domain))
-	}
-	args := []string{"Hello " + domain}
-	args = append(args, c.server.caps...)
-	c.WriteResponse(250, NoEnhancedCode, args...)
-}
-
 func code2xxSuccess(code int) bool {
 	return (code >= 200) && (code <= 299)
 }
@@ -212,28 +172,7 @@ func code5xxPermFail(code int) bool {
 	return (code >= 500) && (code <= 559)
 }
 
-// Handle a command in passthrough mode, until success or permanent failure
-func (c *Conn) handlePassthru(cmd, arg string) {
-	code, msg, err := c.Session().Passthru(0, cmd, arg)
-	c.WriteResponse(code, NoEnhancedCode, msg)
-	if err != nil {
-		return
-	}
-	for {
-		encoded, err := c.ReadLine()
-		if err != nil {
-			return
-		}
-		code, msg, err := c.Session().Passthru(0, encoded, "")
-		c.WriteResponse(code, NoEnhancedCode, msg)
-		if code2xxSuccess(code) || code5xxPermFail(code) {
-			break
-		}
-	}
-}
-
-// Upgrade the downstream connnection
-// Upgrade the upstream connection, if supported.
+// Upgrade the upstream connection, and downstream (if supported)
 func (c *Conn) handleStartTLS() {
 	if _, isTLS := c.TLSConnectionState(); isTLS {
 		c.WriteResponse(502, EnhancedCode{5, 5, 1}, "Already running in TLS")
@@ -259,25 +198,6 @@ func (c *Conn) handleStartTLS() {
 	if err := c.Session().StartTLS(); err != nil {
 		c.WriteResponse(502, EnhancedCode{5, 5, 1}, "TLS not supported by the upstream host")
 	}
-}
-
-//-----------------------------------------------------------------------------
-
-// DATA transparent handler. Note we don't need to check err responses as code, msg carries it
-func (c *Conn) handleData(arg string) {
-	w, code, msg, _ := c.Session().DataCommand()
-	// Enhanced code is at the beginning of msg, no need to add anything
-	c.WriteResponse(code, NoEnhancedCode, msg)
-
-	r := newDataReader(c)
-	code, msg, _ = c.Session().Data(r, w)
-	io.Copy(ioutil.Discard, r) // Make sure all the incoming data has been consumed
-	c.WriteResponse(code, NoEnhancedCode, msg)
-	c.reset()
-}
-
-func (c *Conn) greet() {
-	c.WriteResponse(220, NoEnhancedCode, fmt.Sprintf("%v ESMTP Service Ready", c.server.Domain))
 }
 
 // WriteResponse back to the incoming connection.
@@ -328,4 +248,109 @@ func (c *Conn) reset() {
 		c.session.Reset()
 	}
 	c.fromReceived = false
+}
+
+func (c *Conn) greet() {
+	c.WriteResponse(220, NoEnhancedCode, fmt.Sprintf("%v ESMTP Service Ready", c.server.Domain))
+}
+
+//-----------------------------------------------------------------------------
+// Transparent incoming command handlers
+//-----------------------------------------------------------------------------
+
+// handleHelo - HELO / EHLO received
+func (c *Conn) handleHelo(cmd, arg string) {
+	domain, err := parseHelloArgument(arg)
+	if err != nil {
+		c.WriteResponse(501, EnhancedCode{5, 5, 2}, "Domain/address argument required")
+		return
+	}
+	c.helo = domain
+
+	// If no existing session, establish one
+	if c.session == (interface{})(nil) {
+		s, err := c.server.Backend.Init()
+		if err != nil {
+			c.WriteResponse(421, EnhancedCode{4, 0, 0}, "Internal server error")
+			return
+		}
+		c.session = s
+	}
+	// Pass greeting to the backend, updating our server capabilities to mirror them
+	upstreamCaps, err := c.Session().Greet(cmd)
+	if err != nil {
+		c.WriteResponse(421, EnhancedCode{4, 0, 0}, err.Error())
+		return
+	}
+	if len(upstreamCaps) > 0 {
+		c.server.caps = []string{}
+		for _, i := range upstreamCaps {
+			if i != "STARTTLS" {
+				c.server.caps = append(c.server.caps, i)
+			}
+		}
+		// determine separately our downstream STARTTLS capabilities to the client
+		if _, isTLS := c.TLSConnectionState(); c.server.TLSConfig != nil && !isTLS {
+			c.server.caps = append(c.server.caps, "STARTTLS")
+		}
+	}
+	if cmd == "HELO" {
+		c.WriteResponse(250, EnhancedCode{2, 0, 0}, fmt.Sprintf("Hello %s", domain))
+	}
+	args := []string{"Hello " + domain}
+	args = append(args, c.server.caps...)
+	c.WriteResponse(250, NoEnhancedCode, args...)
+}
+
+// TODO: Currently collapse all these to the passthru command, will change interface later
+func (c *Conn) handleAuth(arg string) {
+	c.handlePassthru("AUTH", arg)
+}
+
+func (c *Conn) handleMail(arg string) {
+	c.handlePassthru("MAIL", arg)
+}
+
+func (c *Conn) handleRcpt(arg string) {
+	c.handlePassthru("RCPT", arg)
+}
+
+func (c *Conn) handleReset(arg string) {
+	c.handlePassthru("RSET", arg)
+}
+
+// handleData
+func (c *Conn) handleData(arg string) {
+	w, code, msg, _ := c.Session().DataCommand()
+	// Enhanced code is at the beginning of msg, no need to add anything
+	c.WriteResponse(code, NoEnhancedCode, msg)
+
+	r := newDataReader(c)
+	code, msg, _ = c.Session().Data(r, w)
+	io.Copy(ioutil.Discard, r) // Make sure all the incoming data has been consumed
+	c.WriteResponse(code, NoEnhancedCode, msg)
+	c.reset()
+}
+func (c *Conn) handleQuit(arg string) {
+	c.handlePassthru("QUIT", arg)
+}
+
+// Handle a command in passthrough mode, until success or permanent failure
+func (c *Conn) handlePassthru(cmd, arg string) {
+	code, msg, err := c.Session().Passthru(0, cmd, arg)
+	c.WriteResponse(code, NoEnhancedCode, msg)
+	if err != nil {
+		return
+	}
+	for {
+		encoded, err := c.ReadLine()
+		if err != nil {
+			return
+		}
+		code, msg, err := c.Session().Passthru(0, encoded, "")
+		c.WriteResponse(code, NoEnhancedCode, msg)
+		if code2xxSuccess(code) || code5xxPermFail(code) {
+			break
+		}
+	}
 }
