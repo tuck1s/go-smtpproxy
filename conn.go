@@ -31,8 +31,6 @@ type Conn struct {
 	nbrErrors int
 	session   Session
 	locker    sync.Mutex
-
-	fromReceived bool
 }
 
 func newConn(c net.Conn, s *Server) *Conn {
@@ -59,16 +57,6 @@ func (c *Conn) init() {
 		}
 	}
 	c.text = textproto.NewConn(rwc)
-}
-
-func (c *Conn) unrecognizedCommand(cmd string) {
-	c.WriteResponse(500, EnhancedCode{5, 5, 2}, fmt.Sprintf("Syntax error, %v command unrecognized", cmd))
-
-	c.nbrErrors++
-	if c.nbrErrors > 3 {
-		c.WriteResponse(500, EnhancedCode{5, 5, 2}, "Too many unrecognized commands")
-		c.Close()
-	}
 }
 
 // Commands are dispatched to the appropriate handler functions.
@@ -101,17 +89,16 @@ func (c *Conn) handle(cmd string, arg string) {
 	case "RCPT":
 		c.handleRcpt(arg)
 	case "RSET": // Reset session
-		c.reset()
-		c.handleReset(arg)
+		c.handleReset()
 	case "DATA":
 		c.handleData(arg)
 	case "STARTTLS":
 		c.handleStartTLS()
 	case "QUIT":
-		c.handleQuit(arg)
+		c.handleQuit()
 		c.Close()
 	default:
-		c.handlePassthru(cmd, arg) // Rather than rejecting this here, use the upstream server's responses
+		c.handleUnknown(cmd, arg) // Rather than rejecting this here, use the upstream server's responses
 	}
 }
 
@@ -191,8 +178,6 @@ func (c *Conn) handleStartTLS() {
 	}
 	c.conn = tlsConn
 	c.init()
-	// Reset envelope as a new EHLO/HELO is required after STARTTLS
-	c.reset()
 
 	// Upgrade the upstream connection, if supported
 	if err := c.Session().StartTLS(); err != nil {
@@ -238,16 +223,6 @@ func (c *Conn) ReadLine() (string, error) {
 		}
 	}
 	return c.text.ReadLine()
-}
-
-func (c *Conn) reset() {
-	c.locker.Lock()
-	defer c.locker.Unlock()
-
-	if c.session != nil {
-		c.session.Reset()
-	}
-	c.fromReceived = false
 }
 
 func (c *Conn) greet() {
@@ -302,21 +277,48 @@ func (c *Conn) handleHelo(cmd, arg string) {
 	c.WriteResponse(250, NoEnhancedCode, args...)
 }
 
-// TODO: Currently collapse all these to the passthru command, will change interface later
 func (c *Conn) handleAuth(arg string) {
-	c.handlePassthru("AUTH", arg)
+	c.handlePassthru("AUTH", arg, c.Session().Auth)
 }
 
 func (c *Conn) handleMail(arg string) {
-	c.handlePassthru("MAIL", arg)
+	c.handlePassthru("MAIL", arg, c.Session().Mail)
 }
 
 func (c *Conn) handleRcpt(arg string) {
-	c.handlePassthru("RCPT", arg)
+	c.handlePassthru("RCPT", arg, c.Session().Rcpt)
 }
 
-func (c *Conn) handleReset(arg string) {
-	c.handlePassthru("RSET", arg)
+func (c *Conn) handleReset() {
+	c.handlePassthru("RSET", "", c.Session().Reset)
+}
+
+func (c *Conn) handleQuit() {
+	c.handlePassthru("QUIT", "", c.Session().Quit)
+}
+
+func (c *Conn) handleUnknown(cmd, arg string) {
+	c.handlePassthru(cmd, arg, c.Session().Unknown)
+}
+
+// handlePassthru - pass the command and args through to the specified backend session function, handling responses transparently until success or permanent failure.
+func (c *Conn) handlePassthru(cmd, arg string, fn SessionFunc) {
+	code, msg, err := fn(0, cmd, arg)
+	c.WriteResponse(code, NoEnhancedCode, msg)
+	if err != nil {
+		return
+	}
+	for {
+		encoded, err := c.ReadLine()
+		if err != nil {
+			return
+		}
+		code, msg, err := fn(0, encoded, "")
+		c.WriteResponse(code, NoEnhancedCode, msg)
+		if code2xxSuccess(code) || code5xxPermFail(code) {
+			break
+		}
+	}
 }
 
 // handleData
@@ -329,28 +331,4 @@ func (c *Conn) handleData(arg string) {
 	code, msg, _ = c.Session().Data(r, w)
 	io.Copy(ioutil.Discard, r) // Make sure all the incoming data has been consumed
 	c.WriteResponse(code, NoEnhancedCode, msg)
-	c.reset()
-}
-func (c *Conn) handleQuit(arg string) {
-	c.handlePassthru("QUIT", arg)
-}
-
-// Handle a command in passthrough mode, until success or permanent failure
-func (c *Conn) handlePassthru(cmd, arg string) {
-	code, msg, err := c.Session().Passthru(0, cmd, arg)
-	c.WriteResponse(code, NoEnhancedCode, msg)
-	if err != nil {
-		return
-	}
-	for {
-		encoded, err := c.ReadLine()
-		if err != nil {
-			return
-		}
-		code, msg, err := c.Session().Passthru(0, encoded, "")
-		c.WriteResponse(code, NoEnhancedCode, msg)
-		if code2xxSuccess(code) || code5xxPermFail(code) {
-			break
-		}
-	}
 }

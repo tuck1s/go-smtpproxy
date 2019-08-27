@@ -11,6 +11,9 @@ type Backend interface {
 	Init() (Session, error)
 }
 
+// SessionFunc Session backend functions
+type SessionFunc func(expectcode int, cmd, arg string) (int, string, error)
+
 // Session backend functions
 type Session interface {
 	// Greet a session. Returns capabilities of the upstream host
@@ -19,15 +22,23 @@ type Session interface {
 	// StartTLS requests the backend to upgrade its connection
 	StartTLS() error
 
-	// Discard currently processed message.
-	Reset()
+	// These backend functions follow a regular pattern matching SessionFunc above
+	Auth(expectcode int, cmd, arg string) (int, string, error)
 
-	// Pass Data command upstream and receive detailed response
+	Mail(expectcode int, cmd, arg string) (int, string, error)
+
+	Rcpt(expectcode int, cmd, arg string) (int, string, error)
+
+	Reset(expectcode int, cmd, arg string) (int, string, error)
+
+	Quit(expectcode int, cmd, arg string) (int, string, error)
+
+	// DataCommand pass upstream, returning a place to write the data AND the usual responses
 	DataCommand() (w io.WriteCloser, code int, msg string, err error)
 
-	// Pass Data body (dot delimited)
+	// Data body (dot delimited) pass upstream, returning the usual responses
 	Data(r io.Reader, w io.WriteCloser) (int, string, error)
 
-	// Pass a command directly through to the backend
-	Passthru(expectcode int, cmd, arg string) (int, string, error)
+	// This is called if we see any unknown command
+	Unknown(expectcode int, cmd, arg string) (int, string, error)
 }
