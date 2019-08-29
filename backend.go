@@ -17,7 +17,7 @@ type SessionFunc func(expectcode int, cmd, arg string) (int, string, error)
 // Session backend functions
 type Session interface {
 	// Greet a session. Returns capabilities of the upstream host
-	Greet(ehlotype string) ([]string, error)
+	Greet(ehlotype string) ([]string, int, string, error)
 
 	// StartTLS requests the backend to upgrade its connection
 	StartTLS() error

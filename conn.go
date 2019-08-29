@@ -252,9 +252,9 @@ func (c *Conn) handleHelo(cmd, arg string) {
 		c.session = s
 	}
 	// Pass greeting to the backend, updating our server capabilities to mirror them
-	upstreamCaps, err := c.Session().Greet(cmd)
+	upstreamCaps, code, msg, err := c.Session().Greet(cmd)
 	if err != nil {
-		c.WriteResponse(421, EnhancedCode{4, 0, 0}, err.Error())
+		c.WriteResponse(code, EnhancedCode{4, 0, 0}, msg)
 		return
 	}
 	if len(upstreamCaps) > 0 {
@@ -264,7 +264,7 @@ func (c *Conn) handleHelo(cmd, arg string) {
 				c.server.caps = append(c.server.caps, i)
 			}
 		}
-		// determine separately our downstream STARTTLS capabilities to the client
+		// determine separately our downstream STARTTLS capabilities to offer the client
 		if _, isTLS := c.TLSConnectionState(); c.server.TLSConfig != nil && !isTLS {
 			c.server.caps = append(c.server.caps, "STARTTLS")
 		}
