@@ -159,21 +159,21 @@ func code5xxPermFail(code int) bool {
 	return (code >= 500) && (code <= 559)
 }
 
-// Upgrade the downstream (client) connection, and upstream (via backend)
+// Change the downstream (client) connection, and upstream connection (via backend) to TLS
 func (c *Conn) handleStartTLS() {
 	if _, isTLS := c.TLSConnectionState(); isTLS {
 		c.WriteResponse(502, EnhancedCode{5, 5, 1}, "Already running in TLS")
 		return
 	}
 
-	// Upgrade upstream to TLS. If this fails, don't continue with the downstream change
-	if code, msg, err := c.Session().StartTLS(); err != nil {
-		c.WriteResponse(code, NoEnhancedCode, msg)
+	// Change upstream to TLS. If this fails, don't continue with the downstream change
+	code, msg, err := c.Session().StartTLS()
+	c.WriteResponse(code, NoEnhancedCode, msg)
+	if err != nil {
 		return
 	}
 
-	// Upgrade downstream to TLS
-	c.WriteResponse(220, EnhancedCode{2, 0, 0}, "Ready to start TLS")
+	// Change downstream to TLS
 	var tlsConn *tls.Conn
 	tlsConn = tls.Server(c.conn, c.server.TLSConfig)
 	if err := tlsConn.Handshake(); err != nil {
