@@ -187,7 +187,7 @@ func (c *Client) ehlo() (int, string, error) {
 func (c *Client) StartTLS(config *tls.Config) (int, string, error) {
 	code, msg, err := c.cmd(220, "STARTTLS")
 	if err != nil {
-		return 0, "", err
+		return code, msg, err
 	}
 	if config == nil {
 		config = &tls.Config{}
