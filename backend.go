@@ -20,7 +20,7 @@ type Session interface {
 	Greet(ehlotype string) ([]string, int, string, error)
 
 	// StartTLS requests the backend to upgrade its connection
-	StartTLS() error
+	StartTLS() (int, string, error)
 
 	// These backend functions follow a regular pattern matching SessionFunc above
 	Auth(expectcode int, cmd, arg string) (int, string, error)

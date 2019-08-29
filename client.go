@@ -184,10 +184,10 @@ func (c *Client) ehlo() (int, string, error) {
 
 // StartTLS sends the STARTTLS command and encrypts all further communication.
 // This is stripped down to not attempt (E)HLOs first.
-func (c *Client) StartTLS(config *tls.Config) error {
-	_, _, err := c.cmd(220, "STARTTLS")
+func (c *Client) StartTLS(config *tls.Config) (int, string, error) {
+	code, msg, err := c.cmd(220, "STARTTLS")
 	if err != nil {
-		return err
+		return 0, "", err
 	}
 	if config == nil {
 		config = &tls.Config{}
@@ -204,7 +204,7 @@ func (c *Client) StartTLS(config *tls.Config) error {
 	c.Text = textproto.NewConn(c.conn)
 	c.tls = true
 	c.didHello = false // Important to pass internal checks before next EHLO
-	return nil
+	return code, msg, err
 }
 
 // TLSConnectionState returns the client's TLS connection state.

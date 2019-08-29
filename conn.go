@@ -159,18 +159,21 @@ func code5xxPermFail(code int) bool {
 	return (code >= 500) && (code <= 559)
 }
 
-// Upgrade the upstream connection, and downstream (if supported)
+// Upgrade the downstream (client) connection, and upstream (via backend)
 func (c *Conn) handleStartTLS() {
 	if _, isTLS := c.TLSConnectionState(); isTLS {
 		c.WriteResponse(502, EnhancedCode{5, 5, 1}, "Already running in TLS")
 		return
 	}
-	if c.server.TLSConfig == nil {
-		c.WriteResponse(502, EnhancedCode{5, 5, 1}, "TLS not supported")
+
+	// Upgrade upstream to TLS. If this fails, don't continue with the downstream change
+	if code, msg, err := c.Session().StartTLS(); err != nil {
+		c.WriteResponse(code, NoEnhancedCode, msg)
 		return
 	}
+
+	// Upgrade downstream to TLS
 	c.WriteResponse(220, EnhancedCode{2, 0, 0}, "Ready to start TLS")
-	// Upgrade to TLS
 	var tlsConn *tls.Conn
 	tlsConn = tls.Server(c.conn, c.server.TLSConfig)
 	if err := tlsConn.Handshake(); err != nil {
@@ -178,11 +181,6 @@ func (c *Conn) handleStartTLS() {
 	}
 	c.conn = tlsConn
 	c.init()
-
-	// Upgrade the upstream connection, if supported
-	if err := c.Session().StartTLS(); err != nil {
-		c.WriteResponse(502, EnhancedCode{5, 5, 1}, "TLS not supported by the upstream host")
-	}
 }
 
 // WriteResponse back to the incoming connection.
@@ -260,13 +258,14 @@ func (c *Conn) handleHelo(cmd, arg string) {
 	if len(upstreamCaps) > 0 {
 		c.server.caps = []string{}
 		for _, i := range upstreamCaps {
-			if i != "STARTTLS" {
-				c.server.caps = append(c.server.caps, i)
+			if i == "STARTTLS" {
+				// Offer STARTTLS to the downstream client, but only if our TLS is configured
+				// and downstream not already in TLS
+				if _, isTLS := c.TLSConnectionState(); c.server.TLSConfig == nil || isTLS {
+					continue
+				}
 			}
-		}
-		// determine separately our downstream STARTTLS capabilities to offer the client
-		if _, isTLS := c.TLSConnectionState(); c.server.TLSConfig != nil && !isTLS {
-			c.server.caps = append(c.server.caps, "STARTTLS")
+			c.server.caps = append(c.server.caps, i)
 		}
 	}
 	if cmd == "HELO" {
