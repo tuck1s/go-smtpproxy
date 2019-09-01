@@ -14,34 +14,19 @@ import (
 	"strings"
 )
 
-// A Client represents a client connection to an SMTP server.
+// A Client represents a client connection to an SMTP server. Stripped out unused functionality for proxy
 type Client struct {
-	// Text is the textproto.Conn used by the Client. It is exported to allow for
-	// clients to add extensions.
-	Text *textproto.Conn
-	// keep a reference to the connection so it can be used to create a TLS
-	// connection later
-	conn net.Conn
-	// whether the Client is using TLS
-	tls        bool
-	serverName string
-	lmtp       bool
-	// map of supported extensions
-	ext map[string]string
-	// supported auth mechanisms
-	auth      []string
-	localName string // the name to use in HELO/EHLO/LHLO
-
-	didHello bool // whether we've said HELO/EHLO/LHLO
-
-	helloMsg  string // the error message from the hello
-	helloCode int    // the error code from the hello
-	helloErr  error  // Error form of the above
-
-	rcptToCount int // number of recipients
-
-	// SMT 2019-08-23 extensions - admittedly tramp data until I figure out writeCloser class better
-	DataResponseCode int
+	Text             *textproto.Conn // Text is the textproto.Conn used by the Client. It is exported to allow for clients to add extensions.
+	conn             net.Conn        // keep a reference to the connection so it can be used to create a TLS connection later
+	tls              bool            // whether the Client is using TLS
+	serverName       string
+	ext              map[string]string // map of supported extensions
+	localName        string            // the name to use in HELO/EHLO/LHLO
+	didHello         bool              // whether we've said HELO/EHLO/LHLO
+	helloMsg         string            // the error message from the hello
+	helloCode        int               // the error code from the hello
+	helloErr         error             // Error form of the above
+	DataResponseCode int               // proxy error reporting for data phase (as writeCloser can only return "error" class)
 	DataResponseMsg  string
 }
 
@@ -78,17 +63,6 @@ func NewClient(conn net.Conn, host string) (*Client, error) {
 	}
 	_, isTLS := conn.(*tls.Conn)
 	c := &Client{Text: text, conn: conn, serverName: host, localName: "localhost", tls: isTLS}
-	return c, nil
-}
-
-// NewClientLMTP returns a new LMTP Client (as defined in RFC 2033) using an
-// existing connector and host as a server name to be used when authenticating.
-func NewClientLMTP(conn net.Conn, host string) (*Client, error) {
-	c, err := NewClient(conn, host)
-	if err != nil {
-		return nil, err
-	}
-	c.lmtp = true
 	return c, nil
 }
 
@@ -156,9 +130,6 @@ func (c *Client) helo() (int, string, error) {
 // Now returns code, msg, error for transparency.
 func (c *Client) ehlo() (int, string, error) {
 	cmd := "EHLO"
-	if c.lmtp {
-		cmd = "LHLO"
-	}
 	code, msg, err := c.cmd(250, "%s %s", cmd, c.localName)
 	if err == nil {
 		ext := make(map[string]string)
@@ -173,9 +144,6 @@ func (c *Client) ehlo() (int, string, error) {
 					ext[args[0]] = ""
 				}
 			}
-		}
-		if mechs, ok := ext["AUTH"]; ok {
-			c.auth = strings.Split(mechs, " ")
 		}
 		c.ext = ext
 	}
