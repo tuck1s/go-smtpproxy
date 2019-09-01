@@ -3,4 +3,5 @@
 debug*.txt
 .vscode/*
 .DS_Store
-*.smt.code-workspace
+*.code-workspace
+__debug_bin

@@ -314,7 +314,7 @@ func (c *Conn) handlePassthru(cmd, arg string, fn SessionFunc) {
 		}
 		code, msg, err := fn(0, encoded, "")
 		c.WriteResponse(code, NoEnhancedCode, msg)
-		if code2xxSuccess(code) || code5xxPermFail(code) {
+		if code2xxSuccess(code) || code5xxPermFail(code) || code == 0 {
 			break
 		}
 	}
@@ -322,12 +322,14 @@ func (c *Conn) handlePassthru(cmd, arg string, fn SessionFunc) {
 
 // handleData
 func (c *Conn) handleData(arg string) {
-	w, code, msg, _ := c.Session().DataCommand()
+	w, code, msg, err := c.Session().DataCommand()
 	// Enhanced code is at the beginning of msg, no need to add anything
 	c.WriteResponse(code, NoEnhancedCode, msg)
-
+	if err != nil {
+		return
+	}
 	r := newDataReader(c)
-	code, msg, _ = c.Session().Data(r, w)
+	code, msg, err = c.Session().Data(r, w)
 	io.Copy(ioutil.Discard, r) // Make sure all the incoming data has been consumed
 	c.WriteResponse(code, NoEnhancedCode, msg)
 }
