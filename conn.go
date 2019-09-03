@@ -155,6 +155,10 @@ func code2xxSuccess(code int) bool {
 	return (code >= 200) && (code <= 299)
 }
 
+func code3xxIntermediate(code int) bool {
+	return (code >= 300) && (code <= 399)
+}
+
 func code5xxPermFail(code int) bool {
 	return (code >= 500) && (code <= 559)
 }
@@ -307,15 +311,18 @@ func (c *Conn) handlePassthru(cmd, arg string, fn SessionFunc) {
 	if err != nil {
 		return
 	}
-	for {
-		encoded, err := c.ReadLine()
-		if err != nil {
-			return
-		}
-		code, msg, err := fn(0, encoded, "")
-		c.WriteResponse(code, NoEnhancedCode, msg)
-		if code2xxSuccess(code) || code5xxPermFail(code) || code == 0 {
-			break
+	// If we have an intermediate response, need to keep going
+	if code3xxIntermediate(code) {
+		for {
+			encoded, err := c.ReadLine()
+			if err != nil {
+				return
+			}
+			code, msg, err := fn(0, encoded, "")
+			c.WriteResponse(code, NoEnhancedCode, msg)
+			if code2xxSuccess(code) || code5xxPermFail(code) || code == 0 {
+				break
+			}
 		}
 	}
 }
