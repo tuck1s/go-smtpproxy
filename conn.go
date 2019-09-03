@@ -321,7 +321,7 @@ func (c *Conn) handlePassthru(cmd, arg string, fn SessionFunc) {
 			code, msg, err := fn(0, encoded, "")
 			c.WriteResponse(code, NoEnhancedCode, msg)
 			if code2xxSuccess(code) || code5xxPermFail(code) || code == 0 {
-				break
+				return
 			}
 		}
 	}
