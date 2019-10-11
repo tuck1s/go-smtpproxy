@@ -37,7 +37,6 @@ func MailCopy(dst io.Writer, src io.Reader) (int, error) {
 	for hdrType, hdrList := range message.Header {
 		for _, hdrVal := range hdrList {
 			hdrLine := hdrType + ": " + hdrVal + smtpCRLF
-			log.Print("\t", hdrLine)
 			bw, err := io.WriteString(dst, hdrLine)
 			bytesWritten += bw
 			if err != nil {
@@ -76,7 +75,6 @@ func handleMessagePart(dst io.Writer, part io.Reader, cType string, cte string) 
 	if err != nil {
 		return bytesWritten, err
 	}
-	log.Printf("\t\tContent-Type: %s, Content-Transfer-Encoding: %s\n", mediaType, cte)
 	if strings.HasPrefix(mediaType, "text/html") {
 		// Insert decoder into incoming part, and encoder into dst. Quoted-Printable is automatically handled
 		// by the reader, no need to handle here: https://golang.org/src/mime/multipart/multipart.go?s=825:1710#L25
