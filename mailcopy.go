@@ -16,13 +16,8 @@ const smtpCRLF = "\r\n"
 
 // Processing of email body via IO stream functions
 
-/* If you just want to pass through the entire mail headers and body, you can just use
-   the following alernative:
-
-func MailCopy(dst io.Writer, src io.Reader) (int64, error) {
-	return io.Copy(dst, src)
-}
-*/
+// If you just want to pass through the entire mail headers and body, you can simply implement TrackHTML using io.Copy
+// and a do-nothing function for ProcessMessageHeaders
 
 // Wrapper interface for engagement tracking
 type Wrapper interface {
@@ -30,7 +25,8 @@ type Wrapper interface {
 	//Returns count of bytes written and error status
 	TrackHTML(w io.Writer, r io.Reader) (n int, e error)
 
-	SetMessageInfo(msgID, rcpt string)
+	// ProcessMessageHeaders reads the message's current headers and updates/inserts any new ones required.
+	ProcessMessageHeaders(h mail.Header) (e error)
 }
 
 // MailCopy transfers the mail body from downstream (client) to upstream (server)
@@ -39,6 +35,11 @@ type Wrapper interface {
 func MailCopy(dst io.Writer, src io.Reader, w Wrapper) (int, error) {
 	bytesWritten := 0
 	message, err := mail.ReadMessage(bufio.NewReader(src))
+	if err != nil {
+		return bytesWritten, err
+	}
+
+	err = w.ProcessMessageHeaders(message.Header)
 	if err != nil {
 		return bytesWritten, err
 	}
@@ -54,6 +55,7 @@ func MailCopy(dst io.Writer, src io.Reader, w Wrapper) (int, error) {
 			}
 		}
 	}
+
 	// Blank line denotes end of headers
 	bw, err := io.WriteString(dst, smtpCRLF)
 	bytesWritten += bw
