@@ -126,8 +126,7 @@ func handlePlainPart(dst io.Writer, src io.Reader) (int, error) {
 
 // Transfer through an html MIME part, wrapping links etc
 func handleHTMLPart(dst io.Writer, src io.Reader, w Wrapper) (int, error) {
-	written, err := w.TrackHTML(dst, src) // Pass HTML through Wrapper function.
-	return int(written), err
+	return w.TrackHTML(dst, src) // Wrap the links and add tracking pixels (if active)
 }
 
 // Transfer through a multipart message, handling recursively as needed
