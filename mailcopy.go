@@ -82,9 +82,11 @@ func handleMessageBody(dst io.Writer, msgHeader mail.Header, msgBody io.Reader, 
 // content type and cte (content transfer encoding) are passed separately
 func handleMessagePart(dst io.Writer, part io.Reader, cType string, cte string, w Wrapper) (int, error) {
 	bytesWritten := 0
-	// Check what MIME media type we have.
+	// Check what MIME media type we have
 	mediaType, params, err := mime.ParseMediaType(cType)
 	if err != nil {
+		// if no media type, defensively handle as per plain, i.e. pass through
+		bytesWritten, err = handlePlainPart(dst, part)
 		return bytesWritten, err
 	}
 	if strings.HasPrefix(mediaType, "text/html") {
@@ -133,7 +135,7 @@ func handleHTMLPart(dst io.Writer, src io.Reader, w Wrapper) (int, error) {
 func handleMultiPart(dst io.Writer, mr *multipart.Reader, bound string, w Wrapper) (int, error) {
 	bytesWritten := 0
 	var err error
-	// Insert the
+	// Insert the info for multipart
 	bw, err := io.WriteString(dst, "This is a multi-part message in MIME format."+smtpCRLF)
 	bytesWritten += bw
 	// Create a part writer with the current boundary and header properties
