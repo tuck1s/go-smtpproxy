@@ -27,6 +27,9 @@ type Wrapper interface {
 
 	// ProcessMessageHeaders reads the message's current headers and updates/inserts any new ones required.
 	ProcessMessageHeaders(h mail.Header) (e error)
+
+	// Active returns bool when wrapping/tracking is active.
+	Active() bool
 }
 
 // MailCopy transfers the mail body from downstream (client) to upstream (server)
@@ -34,6 +37,10 @@ type Wrapper interface {
 // The engagement-tracking Wrapper interface must be fulfilled by the calling code.
 func MailCopy(dst io.Writer, src io.Reader, w Wrapper) (int, error) {
 	bytesWritten := 0
+	if !w.Active() {
+		w64, err := io.Copy(dst, src) // wrapping inactive, just do a copy
+		return int(w64), err
+	}
 	message, err := mail.ReadMessage(bufio.NewReader(src))
 	if err != nil {
 		return bytesWritten, err
