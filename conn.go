@@ -245,7 +245,7 @@ func (c *Conn) handleHelo(cmd, arg string) {
 	c.helo = domain
 
 	// If no existing session, establish one
-	if c.session == (interface{})(nil) {
+	if c.Session() == nil {
 		s, err := c.server.Backend.Init()
 		if err != nil {
 			c.WriteResponse(421, EnhancedCode{4, 0, 0}, "Internal server error")
@@ -281,27 +281,39 @@ func (c *Conn) handleHelo(cmd, arg string) {
 }
 
 func (c *Conn) handleAuth(arg string) {
-	c.handlePassthru("AUTH", arg, c.Session().Auth)
+	if s := c.Session(); s != nil {
+		c.handlePassthru("AUTH", arg, s.Auth)
+	}
 }
 
 func (c *Conn) handleMail(arg string) {
-	c.handlePassthru("MAIL", arg, c.Session().Mail)
+	if s := c.Session(); s != nil {
+		c.handlePassthru("MAIL", arg, s.Mail)
+	}
 }
 
 func (c *Conn) handleRcpt(arg string) {
-	c.handlePassthru("RCPT", arg, c.Session().Rcpt)
+	if s := c.Session(); s != nil {
+		c.handlePassthru("RCPT", arg, s.Rcpt)
+	}
 }
 
 func (c *Conn) handleReset() {
-	c.handlePassthru("RSET", "", c.Session().Reset)
+	if s := c.Session(); s != nil {
+		c.handlePassthru("RSET", "", s.Reset)
+	}
 }
 
 func (c *Conn) handleQuit() {
-	c.handlePassthru("QUIT", "", c.Session().Quit)
+	if s := c.Session(); s != nil {
+		c.handlePassthru("QUIT", "", s.Quit)
+	}
 }
 
 func (c *Conn) handleUnknown(cmd, arg string) {
-	c.handlePassthru(cmd, arg, c.Session().Unknown)
+	if s := c.Session(); s != nil {
+		c.handlePassthru(cmd, arg, s.Unknown)
+	}
 }
 
 // handlePassthru - pass the command and args through to the specified backend session function, handling responses transparently until success or permanent failure.
