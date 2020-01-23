@@ -71,15 +71,15 @@ func MailCopy(dst io.Writer, src io.Reader, w Wrapper) (int, error) {
 	}
 
 	// Handle the message body
-	bw, err = handleMessageBody(dst, message.Header, message.Body, w)
+	bw, err = HandleMessageBody(dst, message.Header, message.Body, w)
 	bytesWritten += bw
 	return bytesWritten, err
 }
 
-// handleMessageBody copies the mail message from msg to dst, with awareness of MIME parts.
+// HandleMessageBody copies the mail message from msg to dst, with awareness of MIME parts.
 // This is probably a naive implementation when it comes to complex multi-part messages and
 // differing encodings.
-func handleMessageBody(dst io.Writer, msgHeader mail.Header, msgBody io.Reader, w Wrapper) (int, error) {
+func HandleMessageBody(dst io.Writer, msgHeader mail.Header, msgBody io.Reader, w Wrapper) (int, error) {
 	cType := msgHeader.Get("Content-Type")
 	cte := msgHeader.Get("Content-Transfer-Encoding")
 	return handleMessagePart(dst, msgBody, cType, cte, w)
