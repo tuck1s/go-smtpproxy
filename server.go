@@ -3,6 +3,7 @@ package smtpproxy
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"io"
 	"log"
@@ -58,6 +59,23 @@ func NewServer(be Backend) *Server {
 		caps:     []string{"PIPELINING", "8BITMIME", "ENHANCEDSTATUSCODES"},
 		conns:    make(map[*Conn]struct{}),
 	}
+}
+
+// ServeTLS configures the server with TLS credentials from supplied cert/key
+// and sets the EHLO server name
+func (s *Server) ServeTLS(cert []byte, privkey []byte) error {
+	cer, err := tls.X509KeyPair(cert, privkey)
+	if err != nil {
+		return err
+	}
+	config := &tls.Config{Certificates: []tls.Certificate{cer}}
+	s.TLSConfig = config
+	leafCer, err := x509.ParseCertificate(cer.Certificate[0])
+	if err != nil {
+		return err
+	}
+	s.Domain = leafCer.Subject.CommonName
+	return nil
 }
 
 // Serve accepts incoming connections on the Listener l.
