@@ -6,27 +6,21 @@ import "io"
 // Linesplitter is an io.Writer
 // See https://www.ietf.org/rfc/rfc2045.txt, section 6.8 for notes on maximum line length of 76 characters
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-type linesplitter struct {
+// LineSplitter splits input every len bytes with a sep byte sequence, outputting to writer w
+type lineSplitter struct {
 	len   int
 	count int
 	sep   []byte
 	w     io.Writer
 }
 
-// NewWriter splits input every len bytes with a sep byte sequence, outputting to writer w
-func (ls *linesplitter) NewWriter(len int, sep []byte, w io.Writer) io.Writer {
-	return &linesplitter{len: len, count: 0, sep: sep, w: w}
+// NewLineSplitterWriter creates a new instance
+func NewLineSplitterWriter(len int, sep []byte, w io.Writer) io.Writer {
+	return &lineSplitter{len: len, count: 0, sep: sep, w: w}
 }
 
-// Split a line in to ls.len chunks with separator
-func (ls *linesplitter) Write(in []byte) (n int, err error) {
+// Write a line in to ls.len chunks with separator
+func (ls *lineSplitter) Write(in []byte) (n int, err error) {
 	writtenThisCall := 0
 	readPos := 0
 	// Leading chunk size is limited by: how much input there is; defined split length; and
@@ -53,4 +47,12 @@ func (ls *linesplitter) Write(in []byte) (n int, err error) {
 		chunkSize = min(inToGo, ls.len)
 	}
 	return writtenThisCall, nil
+}
+
+// no min() built-in function for integers, so declare this here
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
