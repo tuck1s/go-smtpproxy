@@ -7,13 +7,35 @@ The command / response exchanges are passed on transparently.
 
 STARTTLS can be offered to the downstream client if you configure a valid certificate/key pair.
 
-STARTTLS can be requested to the upstream server.
+STARTTLS can be requested from the upstream server.
 
-## Pre-requisites
-- Git & Golang - installation tips [here](#installing-git-golang-on-your-host)
+[Line splitting](linesplitter.go) functions are included for base64 encoded email handling by your app.
 
-Get this project with `go get github.com/tuck1s/go-smtpproxy`
+Get this project with `go get github.com/tuck1s/go-smtpproxy`.
 
-## Installation, configuration
+`cmd/proxy` contains an example command-line app using this library:
 
-TODO
+```bash
+cd cmd/proxy
+go build
+./proxy -h
+
+SMTP proxy that accepts incoming messages from your downstream client, and relays on to an upstream server.
+Usage of ./proxy:
+  -certfile string
+        Certificate file for this server
+  -downstream_debug string
+        File to write downstream server SMTP conversation for debugging
+  -in_hostport string
+        Port number to serve incoming SMTP requests (default "localhost:587")
+  -insecure_skip_verify
+        Skip check of peer cert on upstream side
+  -logfile string
+        File written with message logs (also to stdout)
+  -out_hostport string
+        host:port for onward routing of SMTP requests (default "smtp.sparkpostmail.com:587")
+  -privkeyfile string
+        Private key file for this server
+  -verbose
+        print out lots of messages
+```

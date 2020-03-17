@@ -7,6 +7,7 @@ package smtpproxy
 
 import (
 	"crypto/tls"
+	"errors"
 	"io"
 	"net"
 	"net/textproto"
@@ -244,4 +245,12 @@ func (c *Client) Capabilities() []string {
 	}
 	sort.Strings(caps)
 	return caps
+}
+
+// validateLine checks to see if a line has CR or LF as per RFC 5321
+func validateLine(line string) error {
+	if strings.ContainsAny(line, "\n\r") {
+		return errors.New("smtp: A line must not contain CR or LF")
+	}
+	return nil
 }
