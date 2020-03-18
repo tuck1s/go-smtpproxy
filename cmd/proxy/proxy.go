@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/tuck1s/go-smtpproxy"
+	smtpproxy "github.com/tuck1s/go-smtpproxy"
 )
 
 func main() {
@@ -34,7 +34,7 @@ func main() {
 	log.Println("Outgoing host:port set to", *outHostPort)
 
 	// Set up parameters that the backend will use
-	be := NewBackend(*outHostPort, *verboseOpt, *insecureSkipVerify)
+	be := smtpproxy.NewBackend(*outHostPort, *verboseOpt, *insecureSkipVerify)
 	s := smtpproxy.NewServer(be)
 	s.Addr = *inHostPort
 	s.ReadTimeout = 60 * time.Second

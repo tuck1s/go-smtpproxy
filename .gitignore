@@ -8,3 +8,6 @@ __debug_bin
 # executables
 cmd/proxy/proxy
 ./proxy
+
+# local debug outputs
+debug_*.log
