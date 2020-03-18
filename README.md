@@ -1,4 +1,8 @@
 # go-smtpproxy
+
+[![Build Status](https://travis-ci.org/tuck1s/go-smtpproxy.svg?branch=master)](https://travis-ci.org/tuck1s/go-smtpproxy)
+[![Coverage Status](https://coveralls.io/repos/github/tuck1s/go-smtpproxy/badge.svg?branch=master)](https://coveralls.io/github/tuck1s/go-smtpproxy?branch=master)
+
 Go package, based heavily on [emersion's go-gmtp](https://github.com/emersion/go-smtp), with increased transparency of response codes and no sasl dependency.
 The purpose of this is to provide functions that act as a server to receive SMTP messages from your downstream client. These SMTP messages are relayed through to
 an upstream server.
