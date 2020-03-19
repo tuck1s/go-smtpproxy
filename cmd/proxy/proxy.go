@@ -9,8 +9,22 @@ import (
 	"os"
 	"time"
 
+	"gopkg.in/natefinch/lumberjack.v2" // timed rotating log handler
+
 	smtpproxy "github.com/tuck1s/go-smtpproxy"
 )
+
+// myLogger sets up a custom logger, if filename is given, emitting to stdout as well
+// If filename is blank string, then output is stdout only
+func myLogger(filename string) {
+	if filename != "" {
+		log.SetOutput(&lumberjack.Logger{
+			Filename: filename,
+			MaxAge:   7,    //days
+			Compress: true, // disabled by default
+		})
+	}
+}
 
 func main() {
 	inHostPort := flag.String("in_hostport", "localhost:587", "Port number to serve incoming SMTP requests")
@@ -28,7 +42,7 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
-	smtpproxy.MyLogger(*logfile)
+	myLogger(*logfile)
 	fmt.Println("Starting smtp proxy service on port", *inHostPort, ", logging to", *logfile)
 	log.Println("Starting smtp proxy service on port", *inHostPort)
 	log.Println("Outgoing host:port set to", *outHostPort)

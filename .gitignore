@@ -7,7 +7,9 @@ debug*.txt
 __debug_bin
 # executables
 cmd/proxy/proxy
-./proxy
+proxy
 
 # local debug outputs
 debug_*.log
+debug.test
+proy

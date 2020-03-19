@@ -9,8 +9,6 @@ import (
 	"io"
 	"io/ioutil"
 	"math/rand"
-	"mime"
-	"mime/multipart"
 	"net/mail"
 	"net/smtp"
 	"net/textproto"
@@ -248,10 +246,12 @@ func tlsClientConfig(cert []byte, privkey []byte) (*tls.Config, error) {
 
 //-----------------------------------------------------------------------------
 // proxy tests
+
+const inHostPort = "localhost:5587"
+const outHostPort = ":5588"
+
 func TestProxy(t *testing.T) {
 	rand.Seed(time.Now().UTC().UnixNano())
-	inHostPort := "localhost:5587"
-	outHostPort := ":5588"
 	verboseOpt := true
 	downstreamDebug := "debug_proxy_test.log"
 	insecureSkipVerify := true
@@ -314,6 +314,7 @@ func sendAndCheckEmails(t *testing.T, inHostPort string, n int, secure string, m
 	if err != nil {
 		t.Error(err)
 	}
+
 	// STARTTLS
 	if strings.ToUpper(secure) == "STARTTLS" {
 		if tls, _ := c.Extension("STARTTLS"); tls {
@@ -331,6 +332,13 @@ func sendAndCheckEmails(t *testing.T, inHostPort string, n int, secure string, m
 			}
 		}
 	}
+
+	// Check AUTH supported
+	ok, param := c.Extension("AUTH")
+	if !ok {
+		t.Errorf("Got %v, expected %v, param=%s\n", ok, true, param)
+	}
+
 	// AUTH
 	auth := smtp.PlainAuth("", "user@example.com", "password", "localhost")
 	err = c.Auth(auth)
@@ -435,60 +443,12 @@ func compareInOutMail(t *testing.T, inputMail *mail.Message, outputMail *mail.Me
 	}
 }
 
-// checkMIMEBodyContains recursively parses MIME parts, looking for a string match with s
-func checkMIMEPartContains(t *testing.T, part []byte, cType string, cte string, s string) bool {
-	mediaType, params, err := mime.ParseMediaType(cType)
-	if err != nil {
-		return got(part, s) // handle as  plain
-	}
-	if strings.HasPrefix(mediaType, "text") {
-		if cte == "base64" {
-			rd := base64.NewDecoder(base64.StdEncoding, bytes.NewReader(part))
-			decode, err := ioutil.ReadAll(rd)
-			if err != nil {
-				return false
-			}
-			return got(decode, s)
-		} else {
-			return got(part, s) // handle as plain
-		}
-	} else {
-		// from https://golang.org/pkg/mime/multipart/#example_NewReader
-		if strings.HasPrefix(mediaType, "multipart/") {
-			mr := multipart.NewReader(bytes.NewReader(part), params["boundary"])
-			for {
-				p, err := mr.NextPart()
-				if err == io.EOF {
-					return false
-				}
-				if err != nil {
-					return false
-				}
-				pBytes, err := ioutil.ReadAll(p)
-				if err != nil {
-					return false
-				}
-				if checkMIMEPartContains(t, pBytes, p.Header.Get("Content-Type"), p.Header.Get("Content-Transfer-Encoding"), s) {
-					return true
-				} // otherwise keep looking
-			}
-		} else {
-			// Everything else such as text/plain, image/gif etc pass through
-			return got(part, s)
-		}
-	}
-}
-
-func got(body []byte, s string) bool {
-	return strings.Contains(string(body), s)
-}
-
 func makeFakeSession(t *testing.T, be *smtpproxy.ProxyBackend, url string) smtpproxy.Session {
 	c, err := textproto.Dial("tcp", url)
 	if err != nil {
 		t.Error(err)
 	}
-	return smtpproxy.MakeSession(&smtpproxy.Client{Text: c}, be)
+	return be.MakeSession(&smtpproxy.Client{Text: c})
 }
 
 func TestProxyFaultyInputs(t *testing.T) {
@@ -698,4 +658,9 @@ func RandomURLWithPath() string {
 
 func RandomRecipient() string {
 	return RandomWord() + "@" + RandomWord() + "." + RandomWord()
+}
+
+//-----------------------------------------------------------------------------
+func TestClientOtherFunctions(t *testing.T) {
+
 }

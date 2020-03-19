@@ -1,3 +1,4 @@
+// Package smtpproxy is based heavily on https://github.com/emersion/go-smtp, with increased transparency of response codes and no sasl dependency.
 package smtpproxy
 
 import (
@@ -6,6 +7,9 @@ import (
 	"log"
 	"net"
 )
+
+// This file contains functions for an example Proxy app, including
+//  TLS negotiation, command pass-through, AUTH pass-through.
 
 //-----------------------------------------------------------------------------
 // Backend handlers
@@ -43,7 +47,7 @@ func (bkd *ProxyBackend) loggerAlways(args ...interface{}) {
 }
 
 // MakeSession returns a session for this client and backend
-func MakeSession(c *Client, bkd *ProxyBackend) Session {
+func (bkd *ProxyBackend) MakeSession(c *Client) Session {
 	var s proxySession
 	s.bkd = bkd    // just for logging
 	s.upstream = c // keep record of the upstream Client connection
@@ -59,7 +63,7 @@ func (bkd ProxyBackend) Init() (Session, error) {
 		return nil, err
 	}
 	bkd.logger("< Connection success", bkd.outHostPort)
-	return MakeSession(c, &bkd), nil
+	return bkd.MakeSession(c), nil
 }
 
 //-----------------------------------------------------------------------------
