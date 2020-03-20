@@ -63,10 +63,17 @@ func main() {
 	}
 
 	// Logging of downstream (client to proxy server) commands and responses
-	dbgFile, err := smtpproxy.DownstreamDebug(*downstreamDebug)
-	if err != nil {
-		log.Fatal(err)
+	var dbgFile *os.File
+	if *downstreamDebug != "" {
+		dbgFile, err = os.OpenFile(*downstreamDebug, os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatal(err)
+		} else {
+			defer dbgFile.Close()
+			log.Println("Proxy logging SMTP commands, responses and downstream DATA to", dbgFile.Name())
+		}
 	}
+
 	s, _, err := smtpproxy.CreateProxy(*inHostPort, *outHostPort, *verboseOpt, cert, privkey, *insecureSkipVerify, dbgFile)
 	if err != nil {
 		log.Fatal(err)

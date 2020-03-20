@@ -33,20 +33,6 @@ func CreateProxy(inHostPort, outHostPort string, verboseOpt bool, cert, privkey 
 	return s, be, err
 }
 
-// DownstreamDebug creates a debug file, if non-empty filename passed in
-func DownstreamDebug(downstreamDebug string) (*os.File, error) {
-	var dbgFile *os.File
-	var err error
-	if downstreamDebug != "" {
-		dbgFile, err = os.OpenFile(downstreamDebug, os.O_CREATE|os.O_WRONLY, 0644)
-		if err == nil {
-			defer dbgFile.Close()
-			log.Println("Proxy logging SMTP commands, responses and downstream DATA to", dbgFile.Name())
-		}
-	}
-	return dbgFile, err
-}
-
 //-----------------------------------------------------------------------------
 // Backend handlers
 

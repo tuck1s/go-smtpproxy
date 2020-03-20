@@ -250,20 +250,28 @@ func tlsClientConfig(cert []byte, privkey []byte) (*tls.Config, error) {
 
 const inHostPort = "localhost:5580" // need to specifically have keyword localhost in here for c.Auth to accept nonsecure connections
 const outHostPort = ":5581"
-const downstreamDebug = "debug_proxy_test2.log"
+const downstreamDebug = "debug_proxy_test.log"
+const inHostPort2 = "localhost:5582" // need to specifically have keyword localhost in here for c.Auth to accept nonsecure connections
 
 func TestProxy(t *testing.T) {
 	rand.Seed(time.Now().UTC().UnixNano())
 	verboseOpt := true
 	insecureSkipVerify := true
-	// Logging of downstream (client to proxy server) commands and responses
-	dbgFile, err := smtpproxy.DownstreamDebug(downstreamDebug)
-	if err != nil {
-		log.Fatal(err)
-	}
-	_ = dbgFile
+	var err error
 
-	s, be, err := smtpproxy.CreateProxy(inHostPort, outHostPort, verboseOpt, localhostCert, localhostKey, insecureSkipVerify, nil)
+	// Logging of downstream (client to proxy server) commands and responses
+	var dbgFile *os.File
+	if downstreamDebug != "" {
+		dbgFile, err = os.OpenFile(downstreamDebug, os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatal(err)
+		} else {
+			defer dbgFile.Close()
+			log.Println("Proxy logging SMTP commands, responses and downstream DATA to", dbgFile.Name())
+		}
+	}
+
+	s, be, err := smtpproxy.CreateProxy(inHostPort, outHostPort, verboseOpt, localhostCert, localhostKey, insecureSkipVerify, dbgFile)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -486,11 +494,10 @@ func TestProxyFaultyInputs(t *testing.T) {
 	s = makeFakeSession(t, be, dummyServer)
 	r := strings.NewReader("it is only the hairs on a gooseberry") // this should cause a mailcopy error, as it's not valid RFC822
 	code, msg, err = s.Data(r, myWriteCloser{Writer: ioutil.Discard})
-
-	/*
-		if err == nil {
-			t.Errorf("This test should have returned a non-nil error code")
-		}
+	/* Simple proxy can send any text, does not check MIME parts etc
+	if err == nil {
+		t.Errorf("This test should have returned a non-nil error code")
+	}
 	*/
 
 	// Valid input mail, but cannot write to the destination stream
@@ -509,10 +516,10 @@ func TestProxyFaultyInputs(t *testing.T) {
 	be2 := smtpproxy.NewBackend(outHostPort, verboseOpt, insecureSkipVerify)
 	s = makeFakeSession(t, be2, dummyServer)
 	code, msg, err = s.Data(r, myWriteCloser{Writer: ioutil.Discard})
-	/*
-		if err == nil {
-			t.Errorf("This test should have returned a non-nil error code")
-		}
+	/* Simple proxy can send any text, does not check MIME parts etc
+	if err == nil {
+		t.Errorf("This test should have returned a non-nil error code")
+	}
 	*/
 
 	_, _, _, _ = caps, code, msg, w // workaround these variables being "unused" yet useful for debugging the test
@@ -651,7 +658,7 @@ func RandomRecipient() string {
 }
 
 //-----------------------------------------------------------------------------
-/*
+
 func TestClientOtherFunctions(t *testing.T) {
 	// client uses same certs as mock server and proxy, which seems fine for testing purposes
 	cfg, err := tlsClientConfig(localhostCert, localhostKey)
@@ -684,17 +691,12 @@ func TestClientOtherFunctions(t *testing.T) {
 	}
 }
 
-/*
 func TestServerOtherFunctions(t *testing.T) {
 	verboseOpt := true
 	insecureSkipVerify := true
-	// Logging of downstream (client to proxy server) commands and responses
-	dbgFile, err := smtpproxy.DownstreamDebug(downstreamDebug)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	s, _, err := smtpproxy.CreateProxy("localhost:5586", outHostPort, verboseOpt, localhostCert, localhostKey, insecureSkipVerify, dbgFile)
+	// this time, don't log
+	var dbgFile *os.File
+	s, _, err := smtpproxy.CreateProxy(inHostPort2, outHostPort, verboseOpt, localhostCert, localhostKey, insecureSkipVerify, dbgFile)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -708,4 +710,3 @@ func TestServerOtherFunctions(t *testing.T) {
 	}
 	s.ForEachConn(f)
 }
-*/
