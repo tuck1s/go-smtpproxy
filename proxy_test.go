@@ -1,4 +1,4 @@
-// smtpproxy_test is a simplified (non-wrapping) version of https://github.com/tuck1s/sparkypmtatracking/blob/master/wrap_smtp.go
+// smtpproxy_test is a simplified (non-wrapping) version of https://github.com/tuck1s/sparkypmtatracking/blob/master/wrap_smtp_test.go
 package smtpproxy_test
 
 import (
@@ -695,8 +695,7 @@ func TestServerOtherFunctions(t *testing.T) {
 	verboseOpt := true
 	insecureSkipVerify := true
 	// this time, don't log
-	var dbgFile *os.File
-	s, _, err := smtpproxy.CreateProxy(inHostPort2, outHostPort, verboseOpt, localhostCert, localhostKey, insecureSkipVerify, dbgFile)
+	s, _, err := smtpproxy.CreateProxy(inHostPort2, outHostPort, verboseOpt, nil, nil, insecureSkipVerify, nil)
 	if err != nil {
 		log.Fatal(err)
 	}

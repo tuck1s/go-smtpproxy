@@ -36,7 +36,7 @@ func (ls *lineSplitter) Write(in []byte) (n int, err error) {
 		// if we have completed a chunk, emit a separator
 		if ls.count >= ls.len {
 			ls.w.Write(ls.sep)
-			writtenThisCall += len(ls.sep)
+			// Don't increment writtenThisCall - io.Copy expects a count of bytes *copied* not written (otherwise raises a panic)
 			ls.count = 0
 		}
 		inToGo := len(in) - readPos
