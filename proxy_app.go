@@ -6,10 +6,46 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
+	"time"
 )
 
 // This file contains functions for an example Proxy app, including
 //  TLS negotiation, command pass-through, AUTH pass-through.
+
+// CreateProxy sets up a proxy server with provided parameters and options, also returns the backend.
+func CreateProxy(inHostPort, outHostPort string, verboseOpt bool, cert, privkey []byte, insecureSkipVerify bool, dbgFile *os.File) (*Server, *ProxyBackend, error) {
+	// Set up parameters that the backend will use
+	be := NewBackend(outHostPort, verboseOpt, insecureSkipVerify)
+	s := NewServer(be)
+	s.Addr = inHostPort
+	s.ReadTimeout = 60 * time.Second
+	s.WriteTimeout = 60 * time.Second
+	if dbgFile != nil {
+		s.Debug = dbgFile // Important to write this only if valid
+	}
+	var err error
+	if len(cert) > 0 && len(privkey) > 0 {
+		err = s.ServeTLS(cert, privkey)
+	} else {
+		s.Domain, err = os.Hostname() // This is the fallback in case we have no cert / privkey to give us a Subject
+	}
+	return s, be, err
+}
+
+// DownstreamDebug creates a debug file, if non-empty filename passed in
+func DownstreamDebug(downstreamDebug string) (*os.File, error) {
+	var dbgFile *os.File
+	var err error
+	if downstreamDebug != "" {
+		dbgFile, err = os.OpenFile(downstreamDebug, os.O_CREATE|os.O_WRONLY, 0644)
+		if err == nil {
+			defer dbgFile.Close()
+			log.Println("Proxy logging SMTP commands, responses and downstream DATA to", dbgFile.Name())
+		}
+	}
+	return dbgFile, err
+}
 
 //-----------------------------------------------------------------------------
 // Backend handlers

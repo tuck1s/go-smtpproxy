@@ -7,11 +7,9 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"time"
 
+	"github.com/tuck1s/go-smtpproxy"
 	"gopkg.in/natefinch/lumberjack.v2" // timed rotating log handler
-
-	smtpproxy "github.com/tuck1s/go-smtpproxy"
 )
 
 // myLogger sets up a custom logger, if filename is given, emitting to stdout as well
@@ -47,51 +45,36 @@ func main() {
 	log.Println("Starting smtp proxy service on port", *inHostPort)
 	log.Println("Outgoing host:port set to", *outHostPort)
 
-	// Set up parameters that the backend will use
-	be := smtpproxy.NewBackend(*outHostPort, *verboseOpt, *insecureSkipVerify)
-	s := smtpproxy.NewServer(be)
-	s.Addr = *inHostPort
-	s.ReadTimeout = 60 * time.Second
-	s.WriteTimeout = 60 * time.Second
+	var cert, privkey []byte
 	var err error
-
 	// Gather TLS credentials for the proxy server
 	if *certfile != "" && *privkeyfile != "" {
-		cert, err := ioutil.ReadFile(*certfile)
+		cert, err = ioutil.ReadFile(*certfile)
 		if err != nil {
 			log.Fatal(err)
 		}
-		privkey, err := ioutil.ReadFile(*privkeyfile)
+		privkey, err = ioutil.ReadFile(*privkeyfile)
 		if err != nil {
 			log.Fatal(err)
 		}
 		log.Println("Gathered certificate", *certfile, "and key", *privkeyfile)
-		err = s.ServeTLS(cert, privkey)
-		if err != nil {
-			log.Fatal(err)
-		}
 	} else {
 		log.Println("certfile or privkeyfile not specified - proxy will NOT offer STARTTLS to clients")
-		s.Domain, err = os.Hostname() // This is the fallback in case we have no cert / privkey to give us a Subject
-		if err != nil {
-			log.Fatal("Can't read hostname")
-		}
+	}
+
+	// Logging of downstream (client to proxy server) commands and responses
+	dbgFile, err := smtpproxy.DownstreamDebug(*downstreamDebug)
+	if err != nil {
+		log.Fatal(err)
+	}
+	s, _, err := smtpproxy.CreateProxy(*inHostPort, *outHostPort, *verboseOpt, cert, privkey, *insecureSkipVerify, dbgFile)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	log.Println("Proxy will advertise itself as", s.Domain)
 	log.Println("Verbose SMTP conversation logging:", *verboseOpt)
 	log.Println("insecure_skip_verify (Skip check of peer cert on upstream side):", *insecureSkipVerify)
-
-	// Logging of downstream (client to proxy server) commands and responses
-	if *downstreamDebug != "" {
-		dbgFile, err := os.OpenFile(*downstreamDebug, os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer dbgFile.Close()
-		s.Debug = dbgFile
-		log.Println("Proxy logging SMTP commands, responses and downstream DATA to", dbgFile.Name())
-	}
 
 	// Begin serving requests
 	if err := s.ListenAndServe(); err != nil {

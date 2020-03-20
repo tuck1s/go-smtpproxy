@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"math/rand"
 	"net/mail"
 	"net/smtp"
@@ -247,35 +248,24 @@ func tlsClientConfig(cert []byte, privkey []byte) (*tls.Config, error) {
 //-----------------------------------------------------------------------------
 // proxy tests
 
-const inHostPort = "localhost:5587"
-const outHostPort = ":5588"
+const inHostPort = "localhost:5580" // need to specifically have keyword localhost in here for c.Auth to accept nonsecure connections
+const outHostPort = ":5581"
+const downstreamDebug = "debug_proxy_test2.log"
 
 func TestProxy(t *testing.T) {
 	rand.Seed(time.Now().UTC().UnixNano())
 	verboseOpt := true
-	downstreamDebug := "debug_proxy_test.log"
 	insecureSkipVerify := true
-
-	// Set up parameters that the backend will use, and initialise the proxy server parameters
-	be := smtpproxy.NewBackend(outHostPort, verboseOpt, insecureSkipVerify)
-	s := smtpproxy.NewServer(be)
-	s.Addr = inHostPort
-	s.ReadTimeout = 60 * time.Second
-	s.WriteTimeout = 60 * time.Second
-	var err error
-
-	err = s.ServeTLS(localhostCert, localhostKey)
-	if err != nil {
-		t.Error(err)
-	}
 	// Logging of downstream (client to proxy server) commands and responses
-	if downstreamDebug != "" {
-		dbgFile, err := os.OpenFile(downstreamDebug, os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			t.Error(err)
-		}
-		defer dbgFile.Close()
-		s.Debug = dbgFile
+	dbgFile, err := smtpproxy.DownstreamDebug(downstreamDebug)
+	if err != nil {
+		log.Fatal(err)
+	}
+	_ = dbgFile
+
+	s, be, err := smtpproxy.CreateProxy(inHostPort, outHostPort, verboseOpt, localhostCert, localhostKey, insecureSkipVerify, nil)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	// start the upstream mock SMTP server, which will reply in the channel
@@ -307,7 +297,7 @@ func sendAndCheckEmails(t *testing.T, inHostPort string, n int, secure string, m
 		c, err = smtp.Dial(inHostPort)
 	}
 	if err != nil {
-		t.Error(err)
+		t.Fatalf("Can't connect to proxy: %v\n", err)
 	}
 	// EHLO
 	err = c.Hello("localhost")
@@ -661,6 +651,61 @@ func RandomRecipient() string {
 }
 
 //-----------------------------------------------------------------------------
+/*
 func TestClientOtherFunctions(t *testing.T) {
+	// client uses same certs as mock server and proxy, which seems fine for testing purposes
+	cfg, err := tlsClientConfig(localhostCert, localhostKey)
+	if err != nil {
+		t.Error(err)
+	}
+	// DialTLS is not used by the proxy app in its current form, but may be useful
+	smtps := "smtp.gmail.com:465"
+	c, err := smtpproxy.DialTLS(smtps, cfg)
+	if err != nil {
+		t.Error(err)
+	}
 
+	// Greet the endpoint
+	code, msg, err := c.Hello("there")
+	if err != nil {
+		t.Errorf("code %v msg %v err %v\n", code, msg, err)
+	}
+
+	// Check extensions
+	ok, params := c.Extension("AUTH")
+	if !ok {
+		t.Errorf("ok %v, expected %v, params %v\n", ok, true, params)
+	}
+
+	// Close
+	err = c.Close()
+	if err != nil {
+		t.Error(err)
+	}
 }
+
+/*
+func TestServerOtherFunctions(t *testing.T) {
+	verboseOpt := true
+	insecureSkipVerify := true
+	// Logging of downstream (client to proxy server) commands and responses
+	dbgFile, err := smtpproxy.DownstreamDebug(downstreamDebug)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	s, _, err := smtpproxy.CreateProxy("localhost:5586", outHostPort, verboseOpt, localhostCert, localhostKey, insecureSkipVerify, dbgFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// start the proxy
+	go startProxy(t, s)
+	time.Sleep(1 * time.Second)
+	// Test additional server functions not used by the app
+	f := func(c *smtpproxy.Conn) {
+		fmt.Printf("%v\n", c)
+	}
+	s.ForEachConn(f)
+}
+*/
