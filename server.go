@@ -112,7 +112,7 @@ func (s *Server) handleConn(c *Conn) error {
 	for {
 		line, err := c.ReadLine()
 		if err == nil {
-			cmd, arg, err := parseCmd(line)
+			cmd, arg, err := ParseCmd(line)
 			if err != nil {
 				c.nbrErrors++
 				c.WriteResponse(501, EnhancedCode{5, 5, 2}, "Bad command")
@@ -159,7 +159,7 @@ func (s *Server) ListenAndServe() error {
 	return s.Serve(l)
 }
 
-// Close stops the server.
+// Close function not needed
 func (s *Server) Close() {
 	s.listener.Close()
 
@@ -171,11 +171,4 @@ func (s *Server) Close() {
 	}
 }
 
-// ForEachConn iterates through all opened connections.
-func (s *Server) ForEachConn(f func(*Conn)) {
-	s.locker.Lock()
-	defer s.locker.Unlock()
-	for conn := range s.conns {
-		f(conn)
-	}
-}
+// ForEachConn not needed

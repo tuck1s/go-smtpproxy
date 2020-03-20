@@ -6,7 +6,8 @@ import (
 	"strings"
 )
 
-func parseCmd(line string) (cmd string, arg string, err error) {
+// ParseCmd parses an SMTP command line
+func ParseCmd(line string) (cmd string, arg string, err error) {
 	line = strings.TrimRight(line, "\r\n")
 
 	l := len(line)
@@ -35,6 +36,7 @@ func parseCmd(line string) (cmd string, arg string, err error) {
 	return strings.ToUpper(line[0:4]), strings.Trim(line[5:], " \n\r"), nil
 }
 
+/* Not used by proxy
 // Takes the arguments proceeding a command and files them
 // into a map[string]string after uppercasing each key.  Sample arg
 // string:
@@ -54,6 +56,7 @@ func parseArgs(args []string) (map[string]string, error) {
 	}
 	return argMap, nil
 }
+*/
 
 func parseHelloArgument(arg string) (string, error) {
 	domain := arg

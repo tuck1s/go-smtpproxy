@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -691,6 +692,14 @@ func TestClientOtherFunctions(t *testing.T) {
 	}
 }
 
+// errorMatch allows for fuzzy matching when specific errors expected
+func errorMatch(e1, eChk error) bool {
+	if e1 == nil && eChk == nil {
+		return true
+	}
+	return strings.Contains(e1.Error(), eChk.Error())
+}
+
 func TestServerOtherFunctions(t *testing.T) {
 	verboseOpt := true
 	insecureSkipVerify := true
@@ -699,13 +708,27 @@ func TestServerOtherFunctions(t *testing.T) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	_ = s // currently unused
 
-	// start the proxy
-	go startProxy(t, s)
-	time.Sleep(1 * time.Second)
-	// Test additional server functions not used by the app
-	f := func(c *smtpproxy.Conn) {
-		fmt.Printf("%v\n", c)
+	type actionExpectedResponse struct {
+		line string
+		cmd  string
+		arg  string
+		err  error
 	}
-	s.ForEachConn(f)
+	arList := []actionExpectedResponse{
+		{"", "", "", nil},
+		{"STARTTLS", "STARTTLS", "", nil},
+		{"M", "", "", errors.New(`Command too short`)},
+		{"QUIT", "QUIT", "", nil},
+		{"MAIL ", "", "", errors.New(`Mangled command`)},
+		{"MAILxx", "", "", errors.New(`Mangled command`)},
+		{"MAIL FROM", "MAIL", "FROM", nil},
+	}
+	for _, v := range arList {
+		cmd, arg, err := smtpproxy.ParseCmd(v.line)
+		if cmd != v.cmd || arg != v.arg || !errorMatch(err, v.err) {
+			t.Errorf("Unexpected value cmd, arg, err = (%v, %v, %v) - expected (%v, %v, %v)\n", cmd, arg, err, v.cmd, v.arg, v.err)
+		}
+	}
 }
